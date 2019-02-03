@@ -3,7 +3,6 @@ package bbolt
 import (
 	"bytes"
 	"fmt"
-	"sort"
 )
 
 // Cursor represents an iterator that can traverse over all key/value pairs in a bucket in sorted order.
@@ -267,15 +266,23 @@ func (c *Cursor) search(key []byte, pgid pgid) {
 
 func (c *Cursor) searchNode(key []byte, n *node) {
 	var exact bool
-	index := sort.Search(len(n.inodes), func(i int) bool {
-		// TODO(benbjohnson): Optimize this range search. It's a bit hacky right now.
-		// sort.Search() finds the lowest index where f() != -1 but we need the highest index.
-		ret := bytes.Compare(n.inodes[i].key, key)
-		if ret == 0 {
-			exact = true
+
+	ln := len(n.inodes)
+	low, high := 0, ln
+	for low < high {
+		mid := int(uint(low+high) >> 1) // avoid overflow
+		cmp := bytes.Compare(n.inodes[mid].key, key)
+		if cmp < 0 {
+			low = mid + 1
+		} else {
+			if cmp == 0 {
+				exact = true
+			}
+			high = mid
 		}
-		return ret != -1
-	})
+	}
+
+	index := low
 	if !exact && index > 0 {
 		index--
 	}
@@ -290,15 +297,22 @@ func (c *Cursor) searchPage(key []byte, p *page) {
 	inodes := p.branchPageElements()
 
 	var exact bool
-	index := sort.Search(int(p.count), func(i int) bool {
-		// TODO(benbjohnson): Optimize this range search. It's a bit hacky right now.
-		// sort.Search() finds the lowest index where f() != -1 but we need the highest index.
-		ret := bytes.Compare(inodes[i].key(), key)
-		if ret == 0 {
-			exact = true
+
+	ln := int(p.count)
+	low, high := 0, ln
+	for low < high {
+		mid := int(uint(low+high) >> 1) // avoid overflow
+		cmp := bytes.Compare(inodes[mid].key(), key)
+		if cmp < 0 {
+			low = mid + 1
+		} else {
+			if cmp == 0 {
+				exact = true
+			}
+			high = mid
 		}
-		return ret != -1
-	})
+	}
+	index := low
 	if !exact && index > 0 {
 		index--
 	}
@@ -315,19 +329,35 @@ func (c *Cursor) nsearch(key []byte) {
 
 	// If we have a node then search its inodes.
 	if n != nil {
-		index := sort.Search(len(n.inodes), func(i int) bool {
-			return bytes.Compare(n.inodes[i].key, key) != -1
-		})
-		e.index = index
+		ln := len(n.inodes)
+		low, high := 0, ln
+		for low < high {
+			mid := int(uint(low+high) >> 1) // avoid overflow
+			cmp := bytes.Compare(n.inodes[mid].key, key)
+			if cmp < 0 {
+				low = mid + 1
+			} else {
+				high = mid
+			}
+		}
+		e.index = low
 		return
 	}
 
 	// If we have a page then search its leaf elements.
 	inodes := p.leafPageElements()
-	index := sort.Search(int(p.count), func(i int) bool {
-		return bytes.Compare(inodes[i].key(), key) != -1
-	})
-	e.index = index
+	ln := int(p.count)
+	low, high := 0, ln
+	for low < high {
+		mid := int(uint(low+high) >> 1) // avoid overflow
+		cmp := bytes.Compare(inodes[mid].key(), key)
+		if cmp < 0 {
+			low = mid + 1
+		} else {
+			high = mid
+		}
+	}
+	e.index = low
 }
 
 // keyValue returns the key and value of the current leaf element.
